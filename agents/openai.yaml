@@ -1,0 +1,3 @@
+display_name: Dataset Taxonomy Designer
+short_description: Designs safe rule-based taxonomies with one primary axis plus attributes.
+default_prompt: Inspect this dataset, find overloaded classification fields, design one representative primary axis plus secondary/attribute axes, run the rule-based classification flow end to end, return the final classified output, and do not modify the original source data.

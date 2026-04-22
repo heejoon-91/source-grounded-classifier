@@ -1,0 +1,117 @@
+{
+  "version": "taxonomy-v1",
+  "id_column": "REPLACE_WITH_ID_COLUMN",
+  "text_columns": [
+    "REPLACE_WITH_TEXT_COLUMN"
+  ],
+  "auto_accept_threshold": 0.6,
+  "default_review_status": "needs_review",
+  "taxonomy_design": {
+    "strategy": "representative_plus_attributes",
+    "representative_axis": "primary_class",
+    "secondary_axes": [
+      "secondary_class"
+    ],
+    "attribute_axes": [
+      "attribute_tags"
+    ],
+    "notes": [
+      "Rename axes for the domain. For products this might be primary_category, secondary_category, item_type, health_function, life_stage, commercial_flags.",
+      "The representative axis must be single-value and required or review_if_empty.",
+      "Use multi-value only for cross-cutting attributes/tags, not for the main category."
+    ]
+  },
+  "derived_output": {
+    "identity_columns": [],
+    "drop_source_columns": []
+  },
+  "axes": {
+    "primary_class": {
+      "description": "Rename for the domain. The one best representative class for each row.",
+      "role": "primary",
+      "multi_value": false,
+      "required": true,
+      "review_if_empty": true,
+      "max_values": 1,
+      "values": {
+        "example_value": {
+          "description": "Replace with a primary class supported by the dataset.",
+          "confidence": 0.8,
+          "priority": 0,
+          "source_columns": [
+            "REPLACE_WITH_TEXT_COLUMN"
+          ],
+          "keywords": [
+            "example keyword"
+          ],
+          "negative_keywords": [],
+          "regex": [],
+          "exact_values": {},
+          "numeric_ranges": {},
+          "all_of": [],
+          "any_of": [],
+          "none_of": [],
+          "rule_id": "primary_class.example_value.keyword"
+        }
+      }
+    },
+    "secondary_class": {
+      "description": "Rename for the domain. A narrower subtype when the source data supports it.",
+      "role": "secondary",
+      "multi_value": false,
+      "required": false,
+      "review_if_empty": false,
+      "max_values": 1,
+      "values": {
+        "example_subtype": {
+          "description": "Replace with a narrower subtype.",
+          "confidence": 0.75,
+          "priority": 0,
+          "source_columns": [
+            "REPLACE_WITH_TEXT_COLUMN"
+          ],
+          "keywords": [
+            "example subtype keyword"
+          ],
+          "negative_keywords": [],
+          "regex": [],
+          "exact_values": {},
+          "numeric_ranges": {},
+          "all_of": [],
+          "any_of": [],
+          "none_of": [],
+          "rule_id": "secondary_class.example_subtype.keyword"
+        }
+      }
+    },
+    "attribute_tags": {
+      "description": "Rename or split by domain. Cross-cutting attributes that can have multiple values.",
+      "role": "attribute",
+      "multi_value": true,
+      "required": false,
+      "review_if_empty": false,
+      "max_values": 5,
+      "values": {
+        "example_attribute": {
+          "description": "Replace with an optional cross-cutting attribute.",
+          "confidence": 0.7,
+          "priority": 0,
+          "source_columns": [
+            "REPLACE_WITH_TEXT_COLUMN"
+          ],
+          "keywords": [
+            "example attribute keyword"
+          ],
+          "negative_keywords": [],
+          "regex": [],
+          "exact_values": {},
+          "numeric_ranges": {},
+          "all_of": [],
+          "any_of": [],
+          "none_of": [],
+          "rule_id": "attribute_tags.example_attribute.keyword"
+        }
+      }
+    }
+  }
+}
