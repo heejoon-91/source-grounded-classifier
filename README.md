@@ -12,6 +12,16 @@ This is not a product-only skill. It can be used for support tickets, documents,
 
 This skill is not meant to make the user run several cleanup stages manually. The agent handles profiling, axis design, rule authoring, rule application, and validation internally, then returns the final classified dataset and a short result report as one user-facing process.
 
+For recommendation-oriented reclassification, the standard flow is:
+
+```text
+1. Inspect the original data and identify available attributes.
+2. Redefine those attributes as new columns that are useful for LLM-assisted recommendation.
+3. Create a new table with the new columns, keeping only required source identifiers/display fields such as product ID and product name.
+```
+
+The new table should be a thin canonical derived table, not a copy of the full source table with extra classification columns attached.
+
 ## When To Use It
 
 Use this skill when:
@@ -228,11 +238,21 @@ When the user asks for data in the new schema defined by the rules, create a der
 ```text
 derived_classification_table
 - source_row_id
-- minimal display column such as goods_name or title
+- minimal source identity/display columns such as product_id, sku, goods_name, title
 - one column per rule axis
 - taxonomy_version
 - confidence
 - review_status
+- classified_at
+```
+
+Detailed evidence can be written separately:
+
+```text
+classification_audit
+- source_row_id
+- axis_values
+- conflicts
 - missing_required_axes
 - rule_ids
 - evidence

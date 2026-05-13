@@ -19,14 +19,27 @@ Rule은 프로젝트별로 달라집니다. Schema는 여러 도메인에서 재
     "secondary_axes": ["secondary_category"],
     "attribute_axes": ["function_tags", "status_tags"]
   },
+  "feature_contract": {
+    "retrieval_axes": ["primary_category", "secondary_category"],
+    "ranking_axes": ["function_tags"],
+    "filter_axes": ["primary_category"],
+    "exclusion_axes": [],
+    "fallback_axes": ["primary_category"]
+  },
   "derived_output": {
     "identity_columns": ["name"],
-    "drop_source_columns": ["category", "subcategory"]
+    "drop_source_columns": ["category", "subcategory"],
+    "audit_columns": "minimal"
   },
   "axes": {
     "axis_name": {
       "description": "What this axis means",
       "role": "primary",
+      "used_for_retrieval": true,
+      "used_for_ranking": true,
+      "used_for_filtering": true,
+      "used_for_exclusion": false,
+      "feature_weight_hint": 1.0,
       "multi_value": false,
       "required": false,
       "review_if_empty": false,
@@ -61,7 +74,13 @@ Rule은 프로젝트별로 달라집니다. Schema는 여러 도메인에서 재
 - `taxonomy_design.representative_axis`: 이 row가 주로 무엇인지 답하는 단일값 대표 축입니다.
 - `taxonomy_design.secondary_axes`: optional 단일값 세부 타입 축입니다.
 - `taxonomy_design.attribute_axes`: audience, function, lifecycle, material, risk, channel, collection, status처럼 교차적으로 붙는 optional multi-value 속성/tag 축입니다.
+- `feature_contract`: 추천 로직이 각 derived axis를 retrieval, ranking, filtering, exclusion, fallback 중 어디에 써야 하는지 명시합니다.
 - `role`: optional axis 역할입니다. 보통 `primary`, `secondary`, `attribute`, `status`를 사용합니다.
+- `used_for_retrieval`: 후보군을 좁히는 데 쓰는 axis이면 true입니다.
+- `used_for_ranking`: 정렬, 유사도, 선호도 계산에 쓰는 axis이면 true입니다.
+- `used_for_filtering`: 검색/필터 UI 또는 hard filter에 쓰는 axis이면 true입니다.
+- `used_for_exclusion`: 추천하면 안 되는 조합이나 제외 조건에 쓰는 axis이면 true입니다.
+- `feature_weight_hint`: downstream feature builder가 참고할 상대적 가중치 힌트입니다. 모델 점수는 아닙니다.
 - `multi_value`: true이면 매칭된 값을 모두 유지하고, false이면 confidence가 가장 높은 값을 선택합니다.
 - `required`: true이면 이 axis에 값이 없는 row를 `needs_review`로 보냅니다.
 - `review_if_empty`: `required`와 같은 review 동작입니다. 초기에 중요한 축이지만 항상 채워지지 않을 수 있을 때 사용합니다.
@@ -78,8 +97,9 @@ Rule은 프로젝트별로 달라집니다. Schema는 여러 도메인에서 재
 - `confidence`: match의 기본 confidence입니다. 증거가 강할 때만 높입니다.
 - `priority`: non-multi axis에서 tie-breaker로 사용합니다. confidence가 비슷할 때 priority가 높은 값이 선택됩니다.
 - `rule_id`: audit과 향후 변경 추적을 위한 안정적인 식별자입니다.
-- `derived_output.identity_columns`: rule 적용 결과를 새 스키마 형태로 만들 때 유지할 최소 식별/표시 컬럼입니다. 예: `goods_name`, `title`.
+- `derived_output.identity_columns`: rule 적용 결과를 새 스키마 형태로 만들 때 유지할 최소 식별/표시 원본 컬럼입니다. 예: `product_id`, `sku`, `goods_name`, `title`.
 - `derived_output.drop_source_columns`: 새 derived axis와 의미가 겹쳐 top-level derived output에서 제외할 원본 분류 컬럼입니다. 원본 자체를 삭제한다는 뜻은 아닙니다.
+- `derived_output.audit_columns`: 새 derived table에 직접 남길 audit 컬럼입니다. 기본은 `"minimal"`입니다. `"none"`, `"minimal"`, `"standard"`, `"full"` 그룹명이나 명시적 컬럼 목록을 사용할 수 있습니다.
 
 ## Output Value 원칙
 
@@ -158,9 +178,16 @@ Derived output은 `scripts/create_derived_table.py`가 생성하며 다음 구�
 - `source_row_id`
 - `derived_output.identity_columns`에 지정된 최소 식별/표시 컬럼
 - rule의 각 axis를 펼친 컬럼
+- 기본 최소 운영 audit 컬럼: `taxonomy_version`, `confidence`, `review_status`, `classified_at`
+
+상세 audit output은 별도 산출물로 만들 수 있으며 다음 구조를 권장합니다.
+
+- `source_row_id`
 - `taxonomy_version`
+- `axis_values`
 - `confidence`
 - `review_status`
+- `conflicts`
 - `missing_required_axes`
 - `rule_ids`
 - `evidence`

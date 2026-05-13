@@ -2,8 +2,9 @@
 """Create a derived output shaped by rule-defined classification columns.
 
 This script does not mutate the source data. It keeps only a minimal set of
-identity/display columns, expands rule axes into real columns, and adds audit
-columns for review and traceability. When rules declare
+identity/display columns, expands rule axes into real columns, and adds only
+the requested audit columns. Full rule evidence can be written to a separate
+audit output. When rules declare
 taxonomy_design.strategy=representative_plus_attributes, it also validates that
 the output has one single-value representative axis plus secondary/attribute
 axes before writing anything.
@@ -22,11 +23,54 @@ from apply_rules import classify_row, load_rows
 
 
 DEFAULT_IDENTITY_CANDIDATES = [
+    "product_id",
+    "product_no",
+    "goods_no",
+    "sku",
     "goods_name",
+    "product_name",
     "name",
     "title",
     "label",
     "subject",
+]
+
+DERIVED_AUDIT_COLUMN_GROUPS = {
+    "none": [],
+    "minimal": ["taxonomy_version", "confidence", "review_status", "classified_at"],
+    "standard": [
+        "taxonomy_version",
+        "confidence",
+        "review_status",
+        "missing_required_axes",
+        "rule_ids",
+        "classified_at",
+    ],
+    "full": [
+        "taxonomy_version",
+        "confidence",
+        "review_status",
+        "axis_values",
+        "missing_required_axes",
+        "rule_ids",
+        "evidence",
+        "classified_at",
+    ],
+}
+
+ALLOWED_DERIVED_AUDIT_COLUMNS = set(DERIVED_AUDIT_COLUMN_GROUPS["full"])
+
+AUDIT_OUTPUT_FIELDS = [
+    "source_row_id",
+    "taxonomy_version",
+    "axis_values",
+    "confidence",
+    "review_status",
+    "conflicts",
+    "missing_required_axes",
+    "rule_ids",
+    "evidence",
+    "classified_at",
 ]
 
 
@@ -36,6 +80,46 @@ def parse_csv_list(value: str | None) -> list[str] | None:
     if value.strip() == "":
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def normalize_list(value: Any, name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        return parse_csv_list(value) or []
+    raise SystemExit(f"{name} must be a list or comma-separated string")
+
+
+def derived_output_config(rules: dict[str, Any]) -> dict[str, Any]:
+    config = rules.get("derived_output") or {}
+    if not isinstance(config, dict):
+        raise SystemExit("rules.derived_output must be an object")
+    return config
+
+
+def resolve_audit_columns(config_value: Any, include_axis_values: bool) -> list[str]:
+    if config_value is None:
+        columns = list(DERIVED_AUDIT_COLUMN_GROUPS["minimal"])
+    elif isinstance(config_value, str) and config_value in DERIVED_AUDIT_COLUMN_GROUPS:
+        columns = list(DERIVED_AUDIT_COLUMN_GROUPS[config_value])
+    else:
+        columns = normalize_list(config_value, "audit_columns")
+
+    if include_axis_values and "axis_values" not in columns:
+        columns.append("axis_values")
+
+    invalid = sorted(set(columns) - ALLOWED_DERIVED_AUDIT_COLUMNS)
+    if invalid:
+        allowed = ", ".join(sorted(ALLOWED_DERIVED_AUDIT_COLUMNS))
+        raise SystemExit(f"Unsupported derived audit columns: {', '.join(invalid)}. Allowed: {allowed}")
+
+    deduped = []
+    for column in columns:
+        if column not in deduped:
+            deduped.append(column)
+    return deduped
 
 
 def infer_output_type(path: Path) -> str:
@@ -104,7 +188,7 @@ def validate_design_contract(rules: dict[str, Any]) -> None:
 
 
 def default_identity_columns(rows: list[dict[str, Any]], rules: dict[str, Any]) -> list[str]:
-    configured = (rules.get("derived_output") or {}).get("identity_columns")
+    configured = derived_output_config(rules).get("identity_columns")
     if configured is not None:
         return [str(column) for column in configured]
     if not rows:
@@ -122,6 +206,7 @@ def build_schema(
     rules: dict[str, Any],
     identity_columns: list[str] | None,
     include_axis_values: bool,
+    audit_columns_config: Any,
 ) -> dict[str, Any]:
     id_column = rules.get("id_column")
     if not id_column:
@@ -130,24 +215,25 @@ def build_schema(
     selected_identity_columns = identity_columns
     if selected_identity_columns is None:
         selected_identity_columns = default_identity_columns(rows, rules)
-    selected_identity_columns = [column for column in selected_identity_columns if column != id_column]
+    config = derived_output_config(rules)
+    drop_source_columns = normalize_list(config.get("drop_source_columns"), "drop_source_columns")
 
     axes = axis_names(rules)
     overlap = sorted(set(selected_identity_columns) & set(axes))
     if overlap:
         raise SystemExit(f"Identity columns overlap derived axis columns: {', '.join(overlap)}")
 
-    audit_columns = [
-        "taxonomy_version",
-        "confidence",
-        "review_status",
-        "missing_required_axes",
-        "rule_ids",
-        "evidence",
-        "classified_at",
-    ]
-    if include_axis_values:
-        audit_columns.insert(3, "axis_values")
+    dropped_identity = sorted(set(selected_identity_columns) & set(drop_source_columns))
+    if dropped_identity:
+        raise SystemExit(f"Identity columns cannot also be drop_source_columns: {', '.join(dropped_identity)}")
+
+    if rows:
+        available_columns = set().union(*(row.keys() for row in rows))
+        missing_identity = [column for column in selected_identity_columns if column not in available_columns]
+        if missing_identity:
+            raise SystemExit(f"Identity columns not found in source rows: {', '.join(missing_identity)}")
+
+    audit_columns = resolve_audit_columns(audit_columns_config, include_axis_values)
 
     return {
         "taxonomy_version": rules.get("version", ""),
@@ -165,7 +251,12 @@ def build_schema(
         ],
         "audit_columns": audit_columns,
         "taxonomy_design": rules.get("taxonomy_design", {}),
-        "dropped_source_columns": (rules.get("derived_output") or {}).get("drop_source_columns", []),
+        "dropped_source_columns": drop_source_columns,
+        "column_policy": {
+            "shape": "thin_canonical_derived_table",
+            "source_columns_kept": ["source_row_id", *selected_identity_columns],
+            "source_columns_excluded": drop_source_columns,
+        },
     }
 
 
@@ -174,7 +265,6 @@ def derived_row(
     rules: dict[str, Any],
     schema: dict[str, Any],
     classified_at: str,
-    include_axis_values: bool,
 ) -> dict[str, Any]:
     id_column = schema["id_column"]
     result = classify_row(row, rules)
@@ -190,15 +280,18 @@ def derived_row(
         axis_name = column["name"]
         output[axis_name] = axis_values.get(axis_name, [] if column["multi_value"] else "")
 
-    output["taxonomy_version"] = rules.get("version", "")
-    output["confidence"] = result["confidence"]
-    output["review_status"] = result["review_status"]
-    if include_axis_values:
-        output["axis_values"] = axis_values
-    output["missing_required_axes"] = result["missing_required_axes"]
-    output["rule_ids"] = result["rule_ids"]
-    output["evidence"] = result["evidence"]
-    output["classified_at"] = classified_at
+    audit_values = {
+        "taxonomy_version": rules.get("version", ""),
+        "confidence": result["confidence"],
+        "review_status": result["review_status"],
+        "axis_values": axis_values,
+        "missing_required_axes": result["missing_required_axes"],
+        "rule_ids": result["rule_ids"],
+        "evidence": result["evidence"],
+        "classified_at": classified_at,
+    }
+    for column in schema["audit_columns"]:
+        output[column] = audit_values[column]
     return output
 
 
@@ -206,10 +299,9 @@ def build_rows(
     source_rows: list[dict[str, Any]],
     rules: dict[str, Any],
     schema: dict[str, Any],
-    include_axis_values: bool,
 ) -> list[dict[str, Any]]:
     classified_at = datetime.now(UTC).isoformat()
-    return [derived_row(row, rules, schema, classified_at, include_axis_values) for row in source_rows]
+    return [derived_row(row, rules, schema, classified_at) for row in source_rows]
 
 
 def ordered_fields(schema: dict[str, Any]) -> list[str]:
@@ -222,6 +314,14 @@ def ordered_fields(schema: dict[str, Any]) -> list[str]:
 
 def write_csv(rows: list[dict[str, Any]], schema: dict[str, Any], output: Path) -> None:
     fields = ordered_fields(schema)
+    with output.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: serialize_csv_value(row.get(field)) for field in fields})
+
+
+def write_dict_csv(rows: list[dict[str, Any]], fields: list[str], output: Path) -> None:
     with output.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -252,6 +352,45 @@ def write_output(rows: list[dict[str, Any]], schema: dict[str, Any], output: Pat
         write_json(rows, output)
     else:
         raise ValueError(f"unsupported output type: {resolved_type}")
+
+
+def build_audit_rows(source_rows: list[dict[str, Any]], rules: dict[str, Any], classified_at: str) -> list[dict[str, Any]]:
+    id_column = rules.get("id_column")
+    if not id_column:
+        raise SystemExit("rules.json must include id_column")
+    rows = []
+    for row in source_rows:
+        result = classify_row(row, rules)
+        rows.append(
+            {
+                "source_row_id": row.get(id_column, ""),
+                "taxonomy_version": rules.get("version", ""),
+                "axis_values": result["axis_values"],
+                "confidence": result["confidence"],
+                "review_status": result["review_status"],
+                "conflicts": result["conflicts"],
+                "missing_required_axes": result["missing_required_axes"],
+                "rule_ids": result["rule_ids"],
+                "evidence": result["evidence"],
+                "classified_at": classified_at,
+            }
+        )
+    return rows
+
+
+def write_audit_output(rows: list[dict[str, Any]], output: Path, output_type: str | None, overwrite: bool) -> None:
+    if output.exists() and not overwrite:
+        raise SystemExit(f"Audit output already exists: {output}. Use --overwrite to replace it.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    resolved_type = output_type or infer_output_type(output)
+    if resolved_type == "csv":
+        write_dict_csv(rows, AUDIT_OUTPUT_FIELDS, output)
+    elif resolved_type == "jsonl":
+        write_jsonl(rows, output)
+    elif resolved_type == "json":
+        write_json(rows, output)
+    else:
+        raise ValueError(f"unsupported audit output type: {resolved_type}")
 
 
 def postgres_column_type(schema: dict[str, Any], column: str) -> str:
@@ -332,7 +471,13 @@ def main() -> None:
     parser.add_argument("--output")
     parser.add_argument("--output-type", choices=["csv", "json", "jsonl"])
     parser.add_argument("--identity-columns", help="Comma-separated source columns to keep, e.g. goods_name")
-    parser.add_argument("--include-axis-values", action="store_true")
+    parser.add_argument(
+        "--audit-columns",
+        help="Derived-table audit columns: none, minimal, standard, full, or a comma-separated list",
+    )
+    parser.add_argument("--include-axis-values", action="store_true", help="Add axis_values to derived-table audit columns")
+    parser.add_argument("--audit-output", help="Optional separate audit output with full evidence")
+    parser.add_argument("--audit-output-type", choices=["csv", "json", "jsonl"])
     parser.add_argument("--schema-output")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--skip-design-contract-check", action="store_true")
@@ -349,8 +494,11 @@ def main() -> None:
     if not args.skip_design_contract_check:
         validate_design_contract(rules)
     identity_columns = parse_csv_list(args.identity_columns)
-    schema = build_schema(source_rows, rules, identity_columns, args.include_axis_values)
-    rows = build_rows(source_rows, rules, schema, args.include_axis_values)
+    audit_columns_config = args.audit_columns
+    if audit_columns_config is None:
+        audit_columns_config = derived_output_config(rules).get("audit_columns")
+    schema = build_schema(source_rows, rules, identity_columns, args.include_axis_values, audit_columns_config)
+    rows = build_rows(source_rows, rules, schema)
 
     if args.schema_output:
         schema_path = Path(args.schema_output)
@@ -362,6 +510,12 @@ def main() -> None:
     if args.output:
         write_output(rows, schema, Path(args.output), args.output_type, args.overwrite)
         print(f"wrote {len(rows)} derived rows to {args.output}")
+
+    if args.audit_output:
+        classified_at = rows[0].get("classified_at") if rows else datetime.now(UTC).isoformat()
+        audit_rows = build_audit_rows(source_rows, rules, str(classified_at))
+        write_audit_output(audit_rows, Path(args.audit_output), args.audit_output_type, args.overwrite)
+        print(f"wrote {len(audit_rows)} audit rows to {args.audit_output}")
 
     if args.dsn and args.table:
         write_postgres(rows, schema, args.dsn, args.table, args.replace)

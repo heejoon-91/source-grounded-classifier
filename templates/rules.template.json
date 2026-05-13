@@ -21,14 +21,50 @@
       "Use multi-value only for cross-cutting attributes/tags, not for the main category."
     ]
   },
+  "feature_contract": {
+    "retrieval_axes": [
+      "primary_class",
+      "secondary_class"
+    ],
+    "ranking_axes": [
+      "attribute_tags"
+    ],
+    "filter_axes": [
+      "primary_class"
+    ],
+    "exclusion_axes": [],
+    "fallback_axes": [
+      "primary_class"
+    ],
+    "notes": [
+      "Use retrieval_axes to narrow candidates.",
+      "Use ranking_axes for similarity, preference, or LLM recommendation context.",
+      "Use exclusion_axes for unsafe, incompatible, or irrelevant matches."
+    ]
+  },
   "derived_output": {
-    "identity_columns": [],
-    "drop_source_columns": []
+    "identity_columns": [
+      "REPLACE_WITH_PRODUCT_ID_OR_NAME_COLUMN"
+    ],
+    "drop_source_columns": [
+      "REPLACE_WITH_OLD_CATEGORY_COLUMN"
+    ],
+    "audit_columns": "minimal",
+    "notes": [
+      "Keep only source columns required to identify or display the row, such as product_id, sku, goods_name, product_name, name, or title.",
+      "Do not copy the full source table into the derived output.",
+      "Use a separate audit output when evidence, rule_ids, and axis_values are needed for review."
+    ]
   },
   "axes": {
     "primary_class": {
       "description": "Rename for the domain. The one best representative class for each row.",
       "role": "primary",
+      "used_for_retrieval": true,
+      "used_for_ranking": true,
+      "used_for_filtering": true,
+      "used_for_exclusion": false,
+      "feature_weight_hint": 1.0,
       "multi_value": false,
       "required": true,
       "review_if_empty": true,
@@ -58,6 +94,11 @@
     "secondary_class": {
       "description": "Rename for the domain. A narrower subtype when the source data supports it.",
       "role": "secondary",
+      "used_for_retrieval": true,
+      "used_for_ranking": true,
+      "used_for_filtering": true,
+      "used_for_exclusion": false,
+      "feature_weight_hint": 0.7,
       "multi_value": false,
       "required": false,
       "review_if_empty": false,
@@ -87,6 +128,11 @@
     "attribute_tags": {
       "description": "Rename or split by domain. Cross-cutting attributes that can have multiple values.",
       "role": "attribute",
+      "used_for_retrieval": false,
+      "used_for_ranking": true,
+      "used_for_filtering": true,
+      "used_for_exclusion": false,
+      "feature_weight_hint": 0.5,
       "multi_value": true,
       "required": false,
       "review_if_empty": false,

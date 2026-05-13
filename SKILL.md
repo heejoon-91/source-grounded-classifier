@@ -20,6 +20,8 @@ Ask for or infer these fields:
 - `existing_label_columns`: category/tag/type/status fields, if any
 - `objective`: search, recommendation, analytics, routing, cleanup, compliance, or unknown
 - `write_mode`: `report_only`, `output_file`, `staging_table`, or `derived_table`
+- `recommendation_mode` when objective is recommendation: `related_items`, `similar_items`, `bundle_cross_sell`, `personalized_ranking`, `search_filtering`, or unknown
+- `must_have_axes` when known: axes that downstream recommendation cannot work without
 
 `write_mode` is an execution detail, not a staged user workflow. Infer it from the request:
 
@@ -38,6 +40,12 @@ Default behavior for a cleanup/classification request:
 1. Infer the target output.
 2. Run the internal workflow end to end.
 3. Return the final derived data file or derived/staging table plus a short report.
+
+For recommendation-oriented reclassification, use this standard sequence:
+
+1. Inspect the original data to identify available attributes and overloaded source fields.
+2. Define new columns that make those attributes useful for LLM-assisted recommendation, retrieval, filtering, ranking, exclusion, or review.
+3. Create a new table/output with those new columns, keep only required source identifiers/display fields such as product ID and product name, and fill the new columns from the original row evidence.
 
 Supporting files such as rules, schema, validation reports, and exports may be created for auditability, but they are supporting artifacts. The primary deliverable is the final classified dataset requested by the user.
 
@@ -111,7 +119,9 @@ This workflow is internal to the agent. Execute it end to end for the chosen `wr
      - Keep only minimal identity/display columns such as `source_row_id` and a human-readable name/title when available.
      - Drop source classification columns from top-level output when they are replaced by derived axes.
      - Expand rule axes into real output columns.
-     - Keep `evidence`, `rule_ids`, `confidence`, `review_status`, and `missing_required_axes` for audit.
+     - Keep only minimal operational audit columns in the new table by default: `taxonomy_version`, `confidence`, `review_status`, and `classified_at`.
+     - Put detailed audit payloads such as `axis_values`, `missing_required_axes`, `rule_ids`, and `evidence` in a separate audit output unless the user explicitly asks to keep them in the derived table.
+     - Treat the derived table as a thin canonical table, not a reduced copy of the source table.
    - Only propose adding source columns when the schema owner wants derived fields in the main table.
 
 5. **Author rules**
@@ -130,7 +140,8 @@ This workflow is internal to the agent. Execute it end to end for the chosen `wr
    - Use `scripts/create_derived_table.py` when the user wants data returned in the rule-defined schema instead of a generic `axis_values` payload.
    - For DB sources, export rows to CSV and apply rules, then use `scripts/create_staging_table.py` to load results into a staging table.
    - For DB derived outputs, export rows to CSV and use `scripts/create_derived_table.py --dsn ... --table ...` to create a separate derived table.
-   - Include `confidence`, `evidence`, `rule_ids`, and `review_status`.
+   - Use `scripts/create_derived_table.py --audit-output ...` when detailed evidence should be preserved outside the thin derived table.
+   - Use `derived_output.identity_columns` or `--identity-columns` to keep only required source fields such as product ID, product number, SKU, title, or product name.
 
 7. **Validate**
    - Compare counts: source rows vs classified rows.
@@ -210,13 +221,23 @@ When the user asks for the final cleaned schema, prefer:
 ```text
 derived_classification_table
 - source_row_id
-- minimal human-readable identity/display columns
+- minimal source identity/display columns such as product_id, sku, product_name, title
 - one representative single-value primary axis
 - optional secondary single-value axes
 - optional multi-value attribute/tag axes
+- minimal operational audit columns: taxonomy_version, confidence, review_status, classified_at
+```
+
+For detailed audit, prefer a separate artifact:
+
+```text
+classification_audit
+- source_row_id
 - taxonomy_version
+- axis_values
 - confidence
 - review_status
+- conflicts
 - missing_required_axes
 - rule_ids
 - evidence

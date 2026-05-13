@@ -12,6 +12,16 @@ Dataset Taxonomy Designer는 데이터 안에 있는 기존 `category`, `tag`, `
 
 이 skill은 사용자가 여러 정제 단계를 직접 실행하도록 만드는 도구가 아닙니다. Agent가 내부적으로 데이터 프로파일링, 축 설계, rule 작성, rule 적용, 검증을 한 번에 처리하고, 사용자에게는 최종 분류 데이터와 짧은 결과 리포트를 반환하는 방식으로 사용합니다.
 
+추천용 재분류의 표준 흐름은 아래와 같습니다.
+
+```text
+1. 원본 데이터를 검토해서 어떤 속성들이 있는지 파악합니다.
+2. 그 속성들을 LLM 추천에 쓰기 좋은 새 컬럼 구조로 재정의합니다.
+3. 새 컬럼을 가진 테이블을 만들고, 제품번호/제품명 같은 필수 식별/표시 정보만 원본에서 유지합니다.
+```
+
+새 테이블은 원본 전체 복사본이 아니라, 추천 로직이 바로 읽을 수 있는 얇은 canonical derived table이어야 합니다.
+
 ## 언제 사용하나요?
 
 다음 상황에서 사용합니다.
@@ -228,11 +238,21 @@ classification_staging
 ```text
 derived_classification_table
 - source_row_id
-- goods_name 또는 title 같은 최소 표시 컬럼
+- product_id, sku, goods_name, title 같은 최소 식별/표시 원본 컬럼
 - rule axis를 펼친 컬럼들
 - taxonomy_version
 - confidence
 - review_status
+- classified_at
+```
+
+상세 근거는 별도 audit 산출물로 분리할 수 있습니다.
+
+```text
+classification_audit
+- source_row_id
+- axis_values
+- conflicts
 - missing_required_axes
 - rule_ids
 - evidence

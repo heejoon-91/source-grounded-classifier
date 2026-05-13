@@ -19,14 +19,27 @@ Rules are project-specific. Keep the schema portable and explicit.
     "secondary_axes": ["secondary_category"],
     "attribute_axes": ["function_tags", "status_tags"]
   },
+  "feature_contract": {
+    "retrieval_axes": ["primary_category", "secondary_category"],
+    "ranking_axes": ["function_tags"],
+    "filter_axes": ["primary_category"],
+    "exclusion_axes": [],
+    "fallback_axes": ["primary_category"]
+  },
   "derived_output": {
     "identity_columns": ["name"],
-    "drop_source_columns": ["category", "subcategory"]
+    "drop_source_columns": ["category", "subcategory"],
+    "audit_columns": "minimal"
   },
   "axes": {
     "axis_name": {
       "description": "What this axis means",
       "role": "primary",
+      "used_for_retrieval": true,
+      "used_for_ranking": true,
+      "used_for_filtering": true,
+      "used_for_exclusion": false,
+      "feature_weight_hint": 1.0,
       "multi_value": false,
       "required": false,
       "review_if_empty": false,
@@ -61,7 +74,13 @@ Rules are project-specific. Keep the schema portable and explicit.
 - `taxonomy_design.representative_axis`: the single-value primary axis that best answers "what is this row mainly?"
 - `taxonomy_design.secondary_axes`: optional single-value subtype axes.
 - `taxonomy_design.attribute_axes`: optional multi-value cross-cutting tag/attribute axes.
+- `feature_contract`: declares which derived axes are meant for retrieval, ranking, filtering, exclusion, or fallback. This lets recommendation logic consume the derived output without guessing column roles.
 - `role`: optional axis role, usually `primary`, `secondary`, `attribute`, or `status`.
+- `used_for_retrieval`: true when the axis can narrow the candidate pool.
+- `used_for_ranking`: true when the axis can influence ordering or similarity.
+- `used_for_filtering`: true when the axis can power search/filter UI or hard filters.
+- `used_for_exclusion`: true when the axis can block unsafe or incompatible recommendations.
+- `feature_weight_hint`: optional relative weight hint for downstream feature builders. It is guidance, not a model score.
 - `multi_value`: if true, keep all matching values; otherwise pick the highest confidence match.
 - `required`: if true, rows with no value for this axis become `needs_review`.
 - `review_if_empty`: same review behavior as `required`; use when the axis is important but not always available during early rule development.
@@ -78,8 +97,9 @@ Rules are project-specific. Keep the schema portable and explicit.
 - `confidence`: base confidence for a match. Increase only when evidence is strong.
 - `priority`: tie-breaker for non-multi axes. Higher priority wins when confidence is similar.
 - `rule_id`: stable identifier for audit and future changes.
-- `derived_output.identity_columns`: minimal identity/display columns to keep when creating a rule-shaped derived output. Examples: `goods_name`, `title`.
+- `derived_output.identity_columns`: minimal identity/display source columns to keep when creating a rule-shaped derived output. Examples: `product_id`, `sku`, `goods_name`, `title`.
 - `derived_output.drop_source_columns`: source classification columns replaced by derived axes and excluded from top-level derived output. This does not delete source data.
+- `derived_output.audit_columns`: audit columns to keep directly in the derived table. Use `"minimal"` by default. Valid group names are `"none"`, `"minimal"`, `"standard"`, and `"full"`, or provide an explicit list of allowed audit columns.
 
 ## Output Value Policy
 
@@ -158,9 +178,16 @@ Derived outputs are created by `scripts/create_derived_table.py` and should incl
 - `source_row_id`
 - minimal identity/display columns from `derived_output.identity_columns`
 - one column per rule axis
+- minimal operational audit columns by default: `taxonomy_version`, `confidence`, `review_status`, `classified_at`
+
+Detailed audit outputs can be created separately and include:
+
+- `source_row_id`
 - `taxonomy_version`
+- `axis_values`
 - `confidence`
 - `review_status`
+- `conflicts`
 - `missing_required_axes`
 - `rule_ids`
 - `evidence`
