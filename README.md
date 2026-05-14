@@ -182,6 +182,30 @@ sqlite
 
 DB dumps should be restored only into a temporary DB/schema for inspection, never directly into production or the original source DB.
 
+## Requirements By Data Type
+
+Core CSV/JSON/JSONL classification only needs Python and filesystem access:
+
+```text
+Required for file-based classification
+- Python 3.10+
+- Read access to the source file
+- Write access to the classification output directory
+```
+
+Additional requirements depend on the source and requested output:
+
+| Data or output type | Additional requirement | When needed |
+|---|---|---|
+| PostgreSQL table | `psql` or a PostgreSQL client library | Reading directly from a live PostgreSQL table. |
+| PostgreSQL dump | `pg_restore`/`psql`, or a project-specific dump extractor fallback | Inspecting or extracting table data from a dump file. |
+| PostgreSQL derived/staging table output | `psycopg2` and a valid PostgreSQL DSN | Loading the classified result into a database table. CSV output does not need this. |
+| PostgreSQL `vector` columns or vector search | Server-side `pgvector` extension and `CREATE EXTENSION vector` in the target DB | Restoring/using `vector(n)` columns or running vector similarity queries such as `<->` or `<=>`. |
+| Docker-based DB inspection | Docker or Docker Compose | Optional path for temporary PostgreSQL restore/inspection environments. |
+| Large repository/file search | `rg`/ripgrep | Optional convenience for faster local text search. |
+
+Treat these as conditional requirements. For example, a dataset exported to CSV with embedding values as text does not require pgvector. pgvector is only needed when the PostgreSQL server must store or query those embeddings as the `vector` type.
+
 ## Output Shape
 
 Typical artifacts are listed below. The primary user-facing deliverable is the `derived_output.csv` file. DB derived/staging tables are opt-in outputs for explicit DB-loading requests; rules, schema, and reports are supporting artifacts for auditability and reproducibility.
