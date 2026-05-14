@@ -14,14 +14,21 @@ Rules are project-specific. Keep the schema portable and explicit.
   "auto_accept_threshold": 0.6,
   "default_review_status": "needs_review",
   "taxonomy_design": {
-    "strategy": "representative_plus_attributes",
+    "strategy": "representative_plus_atomic_attributes",
     "representative_axis": "primary_category",
     "secondary_axes": ["secondary_category"],
-    "attribute_axes": ["function_tags", "status_tags"]
+    "attribute_axes": ["life_stage", "food_form", "health_function"],
+    "representative_axis_forbidden_values": ["display-only-value"],
+    "disjoint_axis_value_groups": [
+      {
+        "owner_axis": "display_collection",
+        "excluded_from_axes": ["primary_category"]
+      }
+    ]
   },
   "feature_contract": {
     "retrieval_axes": ["primary_category", "secondary_category"],
-    "ranking_axes": ["function_tags"],
+    "ranking_axes": ["life_stage", "food_form", "health_function"],
     "filter_axes": ["primary_category"],
     "exclusion_axes": [],
     "fallback_axes": ["primary_category"]
@@ -70,10 +77,12 @@ Rules are project-specific. Keep the schema portable and explicit.
 
 - `axes`: independent semantic dimensions discovered from data.
 - `values`: allowed values for one axis.
-- `taxonomy_design.strategy`: use `representative_plus_attributes` for the default one-pass design: one representative primary axis plus optional secondary and attribute axes.
+- `taxonomy_design.strategy`: use `representative_plus_atomic_attributes` for the default one-pass design: one representative primary axis plus optional secondary and atomic attribute axes.
 - `taxonomy_design.representative_axis`: the single-value primary axis that best answers "what is this row mainly?"
 - `taxonomy_design.secondary_axes`: optional single-value subtype axes.
-- `taxonomy_design.attribute_axes`: optional multi-value cross-cutting tag/attribute axes.
+- `taxonomy_design.attribute_axes`: optional atomic cross-cutting attribute axes. Default them to `multi_value: false`.
+- `taxonomy_design.representative_axis_forbidden_values`: observed source values that must never be emitted by the representative axis because they belong to another semantic bucket.
+- `taxonomy_design.disjoint_axis_value_groups`: declares that values owned by one axis must not appear in other axes. For example, values owned by `display_collection` must not appear in `primary_category`.
 - `feature_contract`: declares which derived axes are meant for retrieval, ranking, filtering, exclusion, or fallback. This lets recommendation logic consume the derived output without guessing column roles.
 - `role`: optional axis role, usually `primary`, `secondary`, `attribute`, or `status`.
 - `used_for_retrieval`: true when the axis can narrow the candidate pool.
@@ -81,10 +90,10 @@ Rules are project-specific. Keep the schema portable and explicit.
 - `used_for_filtering`: true when the axis can power search/filter UI or hard filters.
 - `used_for_exclusion`: true when the axis can block unsafe or incompatible recommendations.
 - `feature_weight_hint`: optional relative weight hint for downstream feature builders. It is guidance, not a model score.
-- `multi_value`: if true, keep all matching values; otherwise pick the highest confidence match.
+- `multi_value`: if true, keep all matching values; otherwise pick the highest confidence match. In the default atomic strategy, this should be false unless a `multi_value_exception` explains why the property cannot be split safely.
 - `required`: if true, rows with no value for this axis become `needs_review`.
 - `review_if_empty`: same review behavior as `required`; use when the axis is important but not always available during early rule development.
-- `max_values`: optional cap for `multi_value` axes. Use this when a broad keyword could produce too many labels.
+- `max_values`: optional cap for exceptional `multi_value` axes. Prefer splitting broad labels into atomic columns before using this.
 - `keywords`: case-insensitive substring matches after normalization.
 - `negative_keywords`: if any match, this value rule is blocked.
 - `regex`: regular expressions applied after normalization.
@@ -117,11 +126,13 @@ For search, recommendation, cleanup, analytics, or derived table output, use thi
 
 - One representative primary axis: single-value, required or `review_if_empty`.
 - Optional secondary axes: single-value, narrower subtype fields.
-- Optional attribute axes: multi-value tags for cross-cutting meanings such as audience, function, lifecycle, material, risk, channel, collection, or status.
+- Optional attribute axes: atomic single-property columns for cross-cutting meanings such as audience, function, lifecycle, material, risk, channel, collection, or status.
 
-Do not model the main category as a broad multi-value axis. If one source field contains several meanings, split them across the primary axis, secondary axes, and attribute axes.
+Do not model the main category or source subcategory as a broad multi-value axis. If one source field contains several meanings, split them across the primary axis, secondary axes, and atomic attribute columns. For example, split `subcategory = ["전연령", "주식캔", "체중조절"]` into `life_stage`, `food_form`, and `health_function`, not `subcategory_tag = ["전연령", "주식캔", "체중조절"]`.
 
-`scripts/create_derived_table.py` validates this contract when `taxonomy_design.strategy` is `representative_plus_attributes`.
+Values must have one semantic owner. If a value is assigned to an attribute axis, do not also allow it as a representative primary value. If an overloaded source field contains only an attribute-like value, write explicit fallback rules from other row evidence or send the row to review; do not copy the attribute value into the representative axis.
+
+`scripts/create_derived_table.py` validates this contract when `taxonomy_design.strategy` is `representative_plus_atomic_attributes`.
 
 Criteria groups are intentionally conservative:
 

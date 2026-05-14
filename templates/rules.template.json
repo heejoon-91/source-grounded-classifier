@@ -7,18 +7,32 @@
   "auto_accept_threshold": 0.6,
   "default_review_status": "needs_review",
   "taxonomy_design": {
-    "strategy": "representative_plus_attributes",
+    "strategy": "representative_plus_atomic_attributes",
     "representative_axis": "primary_class",
     "secondary_axes": [
       "secondary_class"
     ],
     "attribute_axes": [
-      "attribute_tags"
+      "life_stage",
+      "food_form"
+    ],
+    "representative_axis_forbidden_values": [],
+    "disjoint_axis_value_groups": [
+      {
+        "owner_axis": "REPLACE_WITH_ATTRIBUTE_AXIS_IF_NEEDED",
+        "excluded_from_axes": [
+          "primary_class"
+        ],
+        "note": "Use when overloaded source category values belong to an attribute axis and must not appear in the representative axis."
+      }
     ],
     "notes": [
-      "Rename axes for the domain. For products this might be primary_category, secondary_category, item_type, health_function, life_stage, commercial_flags.",
+      "Rename axes for the domain. For products this might be primary_category, secondary_category, item_type, health_function, life_stage, food_form, target_species, commercial_status.",
       "The representative axis must be single-value and required or review_if_empty.",
-      "Use multi-value only for cross-cutting attributes/tags, not for the main category."
+      "Default every derived output column to one semantic property and one selected value.",
+      "Do not create broad catch-all axes such as subcategory_tag or attribute_tags when source values can be split into atomic columns.",
+      "Do not allow a value owned by an attribute axis to also appear in the representative axis. Add fallback rules or route rows to review instead.",
+      "Use multi_value only with an explicit multi_value_exception explaining why the property cannot be split safely."
     ]
   },
   "feature_contract": {
@@ -27,10 +41,13 @@
       "secondary_class"
     ],
     "ranking_axes": [
-      "attribute_tags"
+      "life_stage",
+      "food_form"
     ],
     "filter_axes": [
-      "primary_class"
+      "primary_class",
+      "life_stage",
+      "food_form"
     ],
     "exclusion_axes": [],
     "fallback_axes": [
@@ -125,28 +142,28 @@
         }
       }
     },
-    "attribute_tags": {
-      "description": "Rename or split by domain. Cross-cutting attributes that can have multiple values.",
+    "life_stage": {
+      "description": "Rename for the domain. One atomic lifecycle or age-stage property.",
       "role": "attribute",
       "used_for_retrieval": false,
       "used_for_ranking": true,
       "used_for_filtering": true,
       "used_for_exclusion": false,
       "feature_weight_hint": 0.5,
-      "multi_value": true,
+      "multi_value": false,
       "required": false,
       "review_if_empty": false,
-      "max_values": 5,
+      "max_values": 1,
       "values": {
-        "example_attribute": {
-          "description": "Replace with an optional cross-cutting attribute.",
+        "example_life_stage": {
+          "description": "Replace with an observed lifecycle value.",
           "confidence": 0.7,
           "priority": 0,
           "source_columns": [
             "REPLACE_WITH_TEXT_COLUMN"
           ],
           "keywords": [
-            "example attribute keyword"
+            "example life stage keyword"
           ],
           "negative_keywords": [],
           "regex": [],
@@ -155,7 +172,41 @@
           "all_of": [],
           "any_of": [],
           "none_of": [],
-          "rule_id": "attribute_tags.example_attribute.keyword"
+          "rule_id": "life_stage.example_life_stage.keyword"
+        }
+      }
+    },
+    "food_form": {
+      "description": "Rename for the domain. One atomic form-factor or package/form property.",
+      "role": "attribute",
+      "used_for_retrieval": false,
+      "used_for_ranking": true,
+      "used_for_filtering": true,
+      "used_for_exclusion": false,
+      "feature_weight_hint": 0.5,
+      "multi_value": false,
+      "required": false,
+      "review_if_empty": false,
+      "max_values": 1,
+      "values": {
+        "example_form": {
+          "description": "Replace with an observed form-factor value.",
+          "confidence": 0.7,
+          "priority": 0,
+          "source_columns": [
+            "REPLACE_WITH_TEXT_COLUMN"
+          ],
+          "keywords": [
+            "example form keyword"
+          ],
+          "negative_keywords": [],
+          "regex": [],
+          "exact_values": {},
+          "numeric_ranges": {},
+          "all_of": [],
+          "any_of": [],
+          "none_of": [],
+          "rule_id": "food_form.example_form.keyword"
         }
       }
     }

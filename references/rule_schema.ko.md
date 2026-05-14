@@ -14,10 +14,17 @@ Rule은 프로젝트별로 달라집니다. Schema는 여러 도메인에서 재
   "auto_accept_threshold": 0.6,
   "default_review_status": "needs_review",
   "taxonomy_design": {
-    "strategy": "representative_plus_attributes",
+    "strategy": "representative_plus_atomic_attributes",
     "representative_axis": "primary_category",
     "secondary_axes": ["secondary_category"],
-    "attribute_axes": ["function_tags", "status_tags"]
+    "attribute_axes": ["life_stage", "food_form", "health_function"],
+    "representative_axis_forbidden_values": ["display-only-value"],
+    "disjoint_axis_value_groups": [
+      {
+        "owner_axis": "display_collection",
+        "excluded_from_axes": ["primary_category"]
+      }
+    ]
   },
   "feature_contract": {
     "retrieval_axes": ["primary_category", "secondary_category"],
@@ -70,10 +77,12 @@ Rule은 프로젝트별로 달라집니다. Schema는 여러 도메인에서 재
 
 - `axes`: 데이터에서 발견한 독립적인 의미 dimension입니다.
 - `values`: 하나의 axis에서 허용되는 값입니다.
-- `taxonomy_design.strategy`: 기본 one-pass 설계에는 `representative_plus_attributes`를 사용합니다. 대표 primary 축 1개와 optional secondary/attribute 축을 함께 만듭니다.
+- `taxonomy_design.strategy`: 기본 one-pass 설계에는 `representative_plus_atomic_attributes`를 사용합니다. 대표 primary 축 1개와 optional secondary/atomic attribute 축을 함께 만듭니다.
 - `taxonomy_design.representative_axis`: 이 row가 주로 무엇인지 답하는 단일값 대표 축입니다.
 - `taxonomy_design.secondary_axes`: optional 단일값 세부 타입 축입니다.
-- `taxonomy_design.attribute_axes`: audience, function, lifecycle, material, risk, channel, collection, status처럼 교차적으로 붙는 optional multi-value 속성/tag 축입니다.
+- `taxonomy_design.attribute_axes`: audience, function, lifecycle, material, risk, channel, collection, status처럼 교차적으로 붙는 optional atomic 속성 축입니다. 기본은 `multi_value: false`입니다.
+- `taxonomy_design.representative_axis_forbidden_values`: 다른 의미 버킷에 속하므로 대표 축에 절대 들어가면 안 되는 원본 관측 값입니다.
+- `taxonomy_design.disjoint_axis_value_groups`: 특정 axis가 소유한 값이 다른 axis에 나오면 안 된다는 계약입니다. 예를 들어 `display_collection` 값은 `primary_category`에 나오면 안 됩니다.
 - `feature_contract`: 추천 로직이 각 derived axis를 retrieval, ranking, filtering, exclusion, fallback 중 어디에 써야 하는지 명시합니다.
 - `role`: optional axis 역할입니다. 보통 `primary`, `secondary`, `attribute`, `status`를 사용합니다.
 - `used_for_retrieval`: 후보군을 좁히는 데 쓰는 axis이면 true입니다.
@@ -81,10 +90,10 @@ Rule은 프로젝트별로 달라집니다. Schema는 여러 도메인에서 재
 - `used_for_filtering`: 검색/필터 UI 또는 hard filter에 쓰는 axis이면 true입니다.
 - `used_for_exclusion`: 추천하면 안 되는 조합이나 제외 조건에 쓰는 axis이면 true입니다.
 - `feature_weight_hint`: downstream feature builder가 참고할 상대적 가중치 힌트입니다. 모델 점수는 아닙니다.
-- `multi_value`: true이면 매칭된 값을 모두 유지하고, false이면 confidence가 가장 높은 값을 선택합니다.
+- `multi_value`: true이면 매칭된 값을 모두 유지하고, false이면 confidence가 가장 높은 값을 선택합니다. 기본 atomic 전략에서는 false를 우선 사용하고, true를 쓰려면 `multi_value_exception`으로 분리할 수 없는 이유를 남깁니다.
 - `required`: true이면 이 axis에 값이 없는 row를 `needs_review`로 보냅니다.
 - `review_if_empty`: `required`와 같은 review 동작입니다. 초기에 중요한 축이지만 항상 채워지지 않을 수 있을 때 사용합니다.
-- `max_values`: `multi_value` axis에서 유지할 최대 값 개수입니다. 넓은 keyword가 너무 많은 label을 만들 때 사용합니다.
+- `max_values`: 예외적인 `multi_value` axis에서 유지할 최대 값 개수입니다. 먼저 넓은 label을 속성별 컬럼으로 분리하는 것을 우선합니다.
 - `keywords`: 정규화 후 대소문자를 무시하는 substring match입니다.
 - `negative_keywords`: 하나라도 매칭되면 해당 value rule은 차단됩니다.
 - `regex`: 정규화 후 적용되는 regular expression입니다.
@@ -117,11 +126,13 @@ Rule은 프로젝트별로 달라집니다. Schema는 여러 도메인에서 재
 
 - 대표 primary 축 1개: 단일값이고 `required` 또는 `review_if_empty`입니다.
 - optional secondary 축: 단일값 세부 타입 필드입니다.
-- optional attribute 축: audience, function, lifecycle, material, risk, channel, collection, status처럼 여러 값이 자연스러운 교차 속성/tag 필드입니다.
+- optional attribute 축: audience, function, lifecycle, material, risk, channel, collection, status처럼 교차 속성을 속성당 컬럼 하나로 나눈 필드입니다.
 
-메인 카테고리를 넓은 multi-value 축 하나로 만들지 않습니다. 하나의 source field에 여러 의미가 섞여 있으면 primary 축, secondary 축, attribute 축으로 나눕니다.
+메인 카테고리나 source subcategory를 넓은 multi-value 축 하나로 만들지 않습니다. 하나의 source field에 여러 의미가 섞여 있으면 primary 축, secondary 축, atomic attribute 컬럼으로 나눕니다. 예를 들어 `subcategory = ["전연령", "주식캔", "체중조절"]`은 `subcategory_tag` 하나가 아니라 `life_stage`, `food_form`, `health_function`으로 나눕니다.
 
-`taxonomy_design.strategy`가 `representative_plus_attributes`이면 `scripts/create_derived_table.py`가 이 계약을 검증합니다.
+값은 하나의 의미 소유자만 가져야 합니다. 어떤 값이 attribute axis에 배정되었다면 같은 값을 representative primary axis의 허용 값으로 두지 않습니다. source category field에 attribute 성격 값만 단독으로 있는 경우에는 다른 row 근거로 fallback rule을 만들거나 review로 보내야 하며, attribute 값을 representative axis에 그대로 복사하지 않습니다.
+
+`taxonomy_design.strategy`가 `representative_plus_atomic_attributes`이면 `scripts/create_derived_table.py`가 이 계약을 검증합니다.
 
 Criteria group은 의도적으로 보수적으로 동작합니다.
 

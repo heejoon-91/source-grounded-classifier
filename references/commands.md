@@ -17,12 +17,13 @@ These are natural-language commands a user can give to an agent using this skill
 
 | User command | Agent behavior |
 |---|---|
-| `Design better derived columns for this dataset` | Discover semantic axes from evidence and objective. Propose derived classification columns or a staging table schema. |
+| `Design better derived columns for this dataset` | Discover semantic axes from evidence and objective. Propose derived classification columns with one semantic property per column, or a staging table schema. |
 | `Redesign the taxonomy for search and filtering` | Optimize axes for search/filter behavior. Separate overloaded fields into searchable dimensions. |
-| `Design a tag structure for recommendations` | Optimize axes for recommendation signals. Identify target, need-state, compatibility, function, risk, or preference dimensions when supported by data. |
-| `Classify this from the start as one primary category plus attribute tags` | Use `taxonomy_design.strategy=representative_plus_attributes`. Make the primary axis single-value/required, and split secondary types and cross-cutting attributes into separate axes. |
+| `Design a tag structure for recommendations` | Optimize axes for recommendation signals. Identify target, need-state, compatibility, function, risk, or preference dimensions when supported by data. Do not collapse them into one broad tag column. |
+| `Classify this from the start as one primary category plus atomic attributes` | Use `taxonomy_design.strategy=representative_plus_atomic_attributes`. Make the primary axis single-value/required, and split secondary types and cross-cutting attributes into one-property columns. |
 | `Evaluate whether the existing category/subcategory fields are good enough` | Compare existing category-like fields against samples/top values and identify mixed semantic axes, sparse tags, inconsistent naming, or unclear values. |
 | `Also explain why you created these columns` | Include each generated column's purpose, source evidence, single/multi-value policy, and review behavior in the result report. |
+| `Show what original values existed and how they became these columns` | Report original value inventory, raw/individual counts, the full unique individual value list with counts, semantic buckets, resulting columns, produced values, empty counts, and fill rates. |
 
 ## Rule Authoring
 
@@ -39,13 +40,14 @@ These are natural-language commands a user can give to an agent using this skill
 |---|---|
 | `Return a new file with classification columns appended` | Run or propose `scripts/classify_dataset.py`. Create an enriched copy with `classified_*` columns. Never overwrite the original source file. |
 | `Create a separate file with only classification results` | Run or propose `scripts/apply_rules.py`. Create a sidecar classification CSV with row ID, axis values, confidence, evidence, rule IDs, and review status. |
-| `Load the classification output into a DB staging table` | Generate sidecar output, then use `scripts/create_staging_table.py` to load it into a staging table. Do not update the source table. |
-| `Create a table in the new schema defined by the rules` | Run or propose `scripts/create_derived_table.py`. Create a separate derived table with minimal identity columns, rule-axis columns, and audit columns, excluding source classification columns that the new schema replaces. |
-| `Run the whole flow from taxonomy design to final classified data` | Internally profile, design axes, write rules, apply rules, validate, and return the final derived file/table plus a short report. Do not make the user run each stage separately. |
-| `Pick only one representative category and put the rest into tag columns` | Validate the representative/secondary/attribute axis contract before creating derived output; if it fails, fix the rule design first. |
+| `Load the classification output into a DB staging table` | Generate sidecar output, then use `scripts/create_staging_table.py` only because DB loading was explicitly requested. Do not update the source table. |
+| `Create data in the new schema defined by the rules` | Run or propose `scripts/create_derived_table.py`. Create a derived CSV by default with minimal identity columns, rule-axis columns, and audit columns, excluding source classification columns that the new schema replaces. |
+| `Run the whole flow from taxonomy design to final classified data` | Internally profile, design axes, write rules, apply rules, validate, and return the final derived CSV plus an evidence-chain report. Do not make the user run each stage separately. |
+| `Pick only one representative category and split the rest into separate property columns` | Validate the representative/secondary/atomic-attribute axis contract before creating derived output; if it fails, fix the rule design first. |
+| `Make sure display collections do not appear in primary_category` | Add disjoint value constraints so attribute-owned values are excluded from the representative axis, create fallback rules from other evidence, and fail validation if leakage remains. |
 | `Keep only goods_name and the new classification columns in a CSV` | Create a derived CSV with minimal display columns and rule-defined columns. Do not include source classification columns such as `category/subcategory` when they are replaced by derived axes. |
 | `Create a validation report for the classification results` | Run or propose `scripts/validate_classification.py` and summarize fill rate, rule counts, conflicts, review status, unmatched rows, and low-confidence samples. |
-| `Return the final output with column rationale` | Create the final derived file/table and return a short report explaining why each derived column was generated. |
+| `Return the final output with column rationale` | Create the final derived CSV and return a report explaining original values, semantic bucket decisions, generated columns, produced values, and fill rates. |
 
 ## Iteration / Improvement
 
@@ -75,7 +77,7 @@ Classify this dataset.
 - text_columns:
 - existing_label_columns:
 - objective:
-- desired_output: final_derived_file / derived_table / staging_table / report_only
+- desired_output: final_derived_file / derived_csv / staging_table / report_only
 - derived_identity_columns:
 - privacy constraints:
 ```

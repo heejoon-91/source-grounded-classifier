@@ -20,7 +20,8 @@
 | `이 데이터는 어떤 컬럼으로 세분화하면 좋을지 설계해줘` | 데이터 증거와 목적을 기준으로 의미 축을 찾고, 파생 분류 컬럼 또는 staging table schema를 제안합니다. |
 | `검색에 쓰기 좋은 분류 체계로 다시 설계해줘` | 검색/필터링에 유리하도록 분류 축을 최적화하고, 섞여 있는 의미를 별도 dimension으로 분리합니다. |
 | `추천에 쓰기 좋은 태그 구조로 설계해줘` | 추천 signal에 맞춰 대상, need-state, compatibility, function, risk, preference 같은 축을 데이터가 뒷받침하는 범위에서 식별합니다. |
-| `처음부터 대표 카테고리 1개와 속성 태그로 나눠서 분류해줘` | `taxonomy_design.strategy=representative_plus_attributes`를 사용합니다. 대표 primary 축은 단일값/필수로 만들고, 보조 타입과 교차 속성은 별도 축으로 분리합니다. |
+| `처음부터 대표 카테고리 1개와 속성 컬럼으로 나눠서 분류해줘` | `taxonomy_design.strategy=representative_plus_atomic_attributes`를 사용합니다. 대표 primary 축은 단일값/필수로 만들고, 보조 타입과 교차 속성은 `life_stage`, `food_form`처럼 속성당 컬럼 하나로 분리합니다. broad `subcategory_tag` 같은 다중값 컬럼은 기본으로 만들지 않습니다. |
+| `원본 값이 뭐가 있었고 그게 어떻게 이 컬럼이 됐는지 보여줘` | 원본 값 인벤토리, 원본 조합/개별 값 개수, 전체 개별 unique 값 목록과 등장 횟수, 의미 버킷, 결과 컬럼, 생성 값, 빈 값 개수, 채움률을 리포트에 포함합니다. |
 | `기존 category/subcategory가 괜찮은지 판단해줘` | 기존 category-like 필드를 샘플/상위 값과 비교해 의미 축 혼합, sparse tag, 명칭 불일치, 모호한 값을 찾습니다. |
 | `왜 이런 컬럼을 만들었는지도 같이 설명해줘` | 최종 결과 리포트에 각 생성 컬럼의 목적, 원본 근거, 단일/다중값 정책, 검수 동작을 포함합니다. |
 
@@ -39,13 +40,14 @@
 |---|---|
 | `원본에 분류 컬럼을 붙인 새 파일로 반환해줘` | `scripts/classify_dataset.py`를 실행하거나 제안합니다. 원본을 덮어쓰지 않고 `classified_*` 컬럼이 붙은 enriched copy를 만듭니다. |
 | `분류 결과만 따로 파일로 만들어줘` | `scripts/apply_rules.py`를 실행하거나 제안합니다. row ID, axis values, confidence, evidence, rule IDs, review status가 포함된 sidecar CSV를 만듭니다. |
-| `DB staging 테이블로 적재해줘` | sidecar output을 만든 뒤 `scripts/create_staging_table.py`로 staging table에 적재합니다. 원본 테이블은 update하지 않습니다. |
-| `rule로 만든 새 스키마 형태의 테이블로 만들어줘` | `scripts/create_derived_table.py`를 실행하거나 제안합니다. 원본 분류 컬럼은 top-level에서 제외하고, 최소 식별 컬럼과 rule axis 컬럼, audit 컬럼으로 구성된 별도 derived table을 만듭니다. |
-| `분류 설계부터 최종 데이터 생성까지 한번에 해줘` | 프로파일링, 축 설계, rule 작성, 분류 적용, 검증을 내부적으로 일괄 수행하고 최종 derived file/table과 짧은 리포트를 반환합니다. 사용자가 각 단계를 따로 실행하지 않게 합니다. |
+| `DB staging 테이블로 적재해줘` | DB 적재를 명시적으로 요청했으므로 sidecar output을 만든 뒤 `scripts/create_staging_table.py`로 staging table에 적재합니다. 원본 테이블은 update하지 않습니다. |
+| `rule로 만든 새 스키마 형태의 데이터로 만들어줘` | `scripts/create_derived_table.py`를 실행하거나 제안합니다. 기본값은 CSV입니다. 원본 분류 컬럼은 top-level에서 제외하고, 최소 식별 컬럼과 rule axis 컬럼, audit 컬럼으로 구성된 별도 derived CSV를 만듭니다. |
+| `분류 설계부터 최종 데이터 생성까지 한번에 해줘` | 프로파일링, 축 설계, rule 작성, 분류 적용, 검증을 내부적으로 일괄 수행하고 최종 derived CSV와 짧은 리포트를 반환합니다. 사용자가 각 단계를 따로 실행하지 않게 합니다. |
 | `대표 분류는 하나만 고르고 나머지는 태그 컬럼으로 만들어줘` | derived output 생성 전에 rule 파일의 대표축/보조축/속성축 계약을 검증하고, 위반하면 rule 설계부터 수정합니다. |
+| `전시 컬렉션 값이 primary_category에 들어가지 않게 해줘` | attribute axis가 소유한 값이 대표 축에 들어가지 않도록 disjoint 제약을 추가하고, 다른 근거로 fallback rule을 만들며, 누수가 남으면 검증에서 실패시킵니다. |
 | `goods_name만 남기고 새 분류 컬럼 형태로 CSV 만들어줘` | 최소 표시 컬럼과 rule-defined columns만 포함하는 derived CSV를 만듭니다. 기존 `category/subcategory`처럼 새 컬럼과 중복되는 원본 분류 컬럼은 포함하지 않습니다. |
 | `분류 결과 검증 리포트 만들어줘` | `scripts/validate_classification.py`를 실행하거나 제안하고 fill rate, rule counts, conflicts, review status, unmatched rows, low-confidence samples를 요약합니다. |
-| `최종 결과랑 컬럼 생성 이유를 같이 줘` | 최종 derived file/table을 생성한 뒤, 각 derived column을 만든 이유와 근거를 짧은 리포트로 함께 반환합니다. |
+| `최종 결과랑 컬럼 생성 이유를 같이 줘` | 최종 derived CSV를 생성한 뒤, 각 derived column을 만든 이유와 근거를 짧은 리포트로 함께 반환합니다. |
 
 ## 반복 개선
 
@@ -75,7 +77,7 @@
 - text_columns:
 - existing_label_columns:
 - objective:
-- desired_output: final_derived_file / derived_table / staging_table / report_only
+- desired_output: final_derived_file / derived_csv / staging_table / report_only
 - derived_identity_columns:
 - privacy constraints:
 ```

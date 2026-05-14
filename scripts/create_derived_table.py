@@ -5,9 +5,9 @@ This script does not mutate the source data. It keeps only a minimal set of
 identity/display columns, expands rule axes into real columns, and adds only
 the requested audit columns. Full rule evidence can be written to a separate
 audit output. When rules declare
-taxonomy_design.strategy=representative_plus_attributes, it also validates that
-the output has one single-value representative axis plus secondary/attribute
-axes before writing anything.
+taxonomy_design.strategy=representative_plus_atomic_attributes, it also
+validates that the output has one single-value representative axis plus
+single-property secondary/attribute axes before writing anything.
 """
 
 from __future__ import annotations
@@ -155,10 +155,42 @@ def axis_is_multi(rules: dict[str, Any], axis_name: str) -> bool:
     return bool((rules.get("axes") or {}).get(axis_name, {}).get("multi_value"))
 
 
+def axis_rule_values(rules: dict[str, Any], axis_name: str) -> set[str]:
+    axis = (rules.get("axes") or {}).get(axis_name) or {}
+    return {str(value) for value in (axis.get("values") or {}).keys()}
+
+
+def value_set(value: Any) -> set[str]:
+    if value in (None, "", [], {}):
+        return set()
+    if isinstance(value, list):
+        return {str(item) for item in value if item not in (None, "")}
+    return {str(value)}
+
+
+def configured_disjoint_groups(contract: dict[str, Any]) -> list[dict[str, Any]]:
+    groups = []
+    for group in contract.get("disjoint_axis_value_groups") or []:
+        if not isinstance(group, dict):
+            continue
+        owner_axis = str(group.get("owner_axis") or "")
+        if not owner_axis or owner_axis.startswith("REPLACE_WITH"):
+            continue
+        excluded_from_axes = [
+            str(axis)
+            for axis in group.get("excluded_from_axes") or []
+            if str(axis) and not str(axis).startswith("REPLACE_WITH")
+        ]
+        if excluded_from_axes:
+            groups.append({"owner_axis": owner_axis, "excluded_from_axes": excluded_from_axes})
+    return groups
+
+
 def validate_design_contract(rules: dict[str, Any]) -> None:
     """Fail fast when a declared taxonomy design contract is structurally invalid."""
     contract = rules.get("taxonomy_design") or {}
-    if contract.get("strategy") != "representative_plus_attributes":
+    strategy = contract.get("strategy")
+    if strategy not in {"representative_plus_attributes", "representative_plus_atomic_attributes"}:
         return
 
     axes = rules.get("axes") or {}
@@ -178,13 +210,94 @@ def validate_design_contract(rules: dict[str, Any]) -> None:
         if axis_name not in axes:
             raise SystemExit(f"taxonomy_design.secondary_axes contains undefined axis: {axis_name}")
         if axes[axis_name].get("multi_value"):
-            raise SystemExit(f"Secondary axis should be single-value; use attribute_axes for multi-value tags: {axis_name}")
+            raise SystemExit(f"Secondary axis should be single-value; split multi-value tags into atomic attribute axes: {axis_name}")
 
     for axis_name in contract.get("attribute_axes") or []:
         if axis_name not in axes:
             raise SystemExit(f"taxonomy_design.attribute_axes contains undefined axis: {axis_name}")
-        if not axes[axis_name].get("multi_value"):
+        if strategy == "representative_plus_attributes" and not axes[axis_name].get("multi_value"):
             raise SystemExit(f"Attribute axis should be multi-value or moved out of attribute_axes: {axis_name}")
+        if strategy == "representative_plus_atomic_attributes" and axes[axis_name].get("multi_value"):
+            exception_note = axes[axis_name].get("multi_value_exception") or axes[axis_name].get("multi_value_justification")
+            if not exception_note:
+                raise SystemExit(
+                    "Atomic attribute axes must be single-value by default. "
+                    f"Split broad multi-value axis into one-property columns or add multi_value_exception: {axis_name}"
+                )
+
+    representative_values = axis_rule_values(rules, representative_axis)
+    forbidden_values = {str(value) for value in contract.get("representative_axis_forbidden_values") or []}
+    forbidden_overlap = sorted(representative_values & forbidden_values)
+    if forbidden_overlap:
+        raise SystemExit(
+            "Representative axis declares forbidden values as allowed rule values: "
+            f"{representative_axis} -> {', '.join(forbidden_overlap)}"
+        )
+
+    for group in configured_disjoint_groups(contract):
+        owner_axis = group["owner_axis"]
+        owner_values = axis_rule_values(rules, owner_axis)
+        for excluded_axis in group["excluded_from_axes"]:
+            overlap = sorted(owner_values & axis_rule_values(rules, excluded_axis))
+            if overlap:
+                raise SystemExit(
+                    "Axis value ownership conflict: "
+                    f"values owned by {owner_axis} also appear in {excluded_axis}: {', '.join(overlap)}"
+                )
+
+
+def validate_derived_row_contract(rules: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+    contract = rules.get("taxonomy_design") or {}
+    strategy = contract.get("strategy")
+    if strategy not in {"representative_plus_attributes", "representative_plus_atomic_attributes"}:
+        return
+
+    representative_axis = str(contract.get("representative_axis") or "")
+    forbidden_values = {str(value) for value in contract.get("representative_axis_forbidden_values") or []}
+    violations = []
+
+    if representative_axis and forbidden_values:
+        for row in rows:
+            overlap = value_set(row.get(representative_axis)) & forbidden_values
+            if overlap:
+                violations.append(
+                    {
+                        "source_row_id": row.get("source_row_id", ""),
+                        "axis": representative_axis,
+                        "values": sorted(overlap),
+                    }
+                )
+                if len(violations) >= 10:
+                    break
+
+    for group in configured_disjoint_groups(contract):
+        owner_axis = group["owner_axis"]
+        for row in rows:
+            owner_values = value_set(row.get(owner_axis))
+            if not owner_values:
+                continue
+            for excluded_axis in group["excluded_from_axes"]:
+                overlap = owner_values & value_set(row.get(excluded_axis))
+                if overlap:
+                    violations.append(
+                        {
+                            "source_row_id": row.get("source_row_id", ""),
+                            "owner_axis": owner_axis,
+                            "excluded_axis": excluded_axis,
+                            "values": sorted(overlap),
+                        }
+                    )
+                    if len(violations) >= 10:
+                        break
+            if len(violations) >= 10:
+                break
+
+    if violations:
+        raise SystemExit(
+            "Derived output violates taxonomy_design disjoint value contract. "
+            "Fix rules and regenerate output; do not post-process manually. "
+            + json.dumps(violations, ensure_ascii=False)
+        )
 
 
 def default_identity_columns(rows: list[dict[str, Any]], rules: dict[str, Any]) -> list[str]:
@@ -499,6 +612,8 @@ def main() -> None:
         audit_columns_config = derived_output_config(rules).get("audit_columns")
     schema = build_schema(source_rows, rules, identity_columns, args.include_axis_values, audit_columns_config)
     rows = build_rows(source_rows, rules, schema)
+    if not args.skip_design_contract_check:
+        validate_derived_row_contract(rules, rows)
 
     if args.schema_output:
         schema_path = Path(args.schema_output)

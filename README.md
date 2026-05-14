@@ -16,11 +16,11 @@ For recommendation-oriented reclassification, the standard flow is:
 
 ```text
 1. Inspect the original data and identify available attributes.
-2. Redefine those attributes as new columns that are useful for LLM-assisted recommendation.
-3. Create a new table with the new columns, keeping only required source identifiers/display fields such as product ID and product name.
+2. Redefine those attributes as new columns that are useful for LLM-assisted recommendation, with one semantic property per column.
+3. Create a new CSV output with the new columns, keeping only required source identifiers/display fields such as product ID and product name.
 ```
 
-The new table should be a thin canonical derived table, not a copy of the full source table with extra classification columns attached.
+The new CSV should be a thin canonical derived output, not a copy of the full source table with extra classification columns attached.
 
 ## When To Use It
 
@@ -57,9 +57,9 @@ This skill guides the agent to split those meanings into derived classification 
 {
   "species": ["강아지"],
   "primary_category": "사료",
-  "life_stage": ["전연령"],
-  "food_form": ["주식캔"],
-  "display_collection": ["wet_food_zone"]
+  "life_stage": "전연령",
+  "food_form": "주식캔",
+  "display_collection": "습식관"
 }
 ```
 
@@ -67,17 +67,17 @@ Column names and axis count are not fixed. The agent should infer them from the 
 
 ## Default Classification Design
 
-The default design is not one broad multi-value category. For search, recommendation, cleanup, analytics, or derived table work, the skill guides the agent to classify in this shape from the start:
+The default design is not one broad multi-value category or one broad `subcategory_tag` column. For search, recommendation, cleanup, analytics, or derived output work, the skill guides the agent to classify in this shape from the start:
 
 ```text
 one representative primary axis   single-value, required or review_if_empty
 optional secondary axes           single-value, narrower subtypes
-optional attribute axes           multi-value cross-cutting attributes such as function, audience, lifecycle, status, format, material, risk, or collection
+optional attribute axes           atomic single-property columns such as function, audience, lifecycle, status, format, material, risk, or collection
 ```
 
-For product data, `primary_category` should choose one best main category, while lifecycle, health function, commercial status, and format belong in separate attribute axes. For other domains, the same rule applies with domain-specific names, such as `primary_issue_type`, `primary_content_type`, or `primary_event_type`.
+For product data, `primary_category` should choose one best main category, while lifecycle, health function, commercial status, and format belong in separate atomic attribute axes such as `life_stage`, `health_function`, `commercial_status`, and `food_form`. For other domains, the same rule applies with domain-specific names, such as `primary_issue_type`, `primary_content_type`, or `primary_event_type`.
 
-This contract is represented by `taxonomy_design.strategy = representative_plus_attributes`, and the derived output script validates the structure before writing results.
+This contract is represented by `taxonomy_design.strategy = representative_plus_atomic_attributes`, and the derived output script validates the structure before writing results.
 
 ## Output Value Policy
 
@@ -108,9 +108,9 @@ Use English slugs for technical identifiers such as `rule_id`, filenames, and in
 
 3. Designs new classification axes.
    - Required core taxonomy columns
-   - Optional attribute/tag columns
+   - Optional atomic attribute columns
    - Single-value axes
-   - Multi-value axes
+   - Multi-value axes only when explicitly justified
    - Axes that should route missing values to review
 
 4. Writes deterministic rules.
@@ -126,8 +126,8 @@ Use English slugs for technical identifiers such as `rule_id`, filenames, and in
    - sidecar CSV
    - enriched copy
    - validation report
-   - DB staging table
-   - rule-defined derived table
+   - DB staging table, only when explicitly requested
+   - rule-defined derived CSV
 
 ## How To Use
 
@@ -162,7 +162,7 @@ The agent follows the `SKILL.md` workflow internally. The user does not need to 
 4. Write rules
 5. Generate classification output
 6. Create a validation report
-7. Return the final derived file/table and a short report
+7. Return the final derived CSV file and a short report
 ```
 
 For more examples, see [English command examples](references/commands.md) or [Korean command examples](references/commands.ko.md).
@@ -184,7 +184,7 @@ DB dumps should be restored only into a temporary DB/schema for inspection, neve
 
 ## Output Shape
 
-Typical artifacts are listed below. The primary user-facing deliverable is the `derived_output` file or DB derived/staging table; rules, schema, and reports are supporting artifacts for auditability and reproducibility.
+Typical artifacts are listed below. The primary user-facing deliverable is the `derived_output.csv` file. DB derived/staging tables are opt-in outputs for explicit DB-loading requests; rules, schema, and reports are supporting artifacts for auditability and reproducibility.
 
 ```text
 classification/
@@ -197,17 +197,45 @@ classification/
   validation_report.json
 ```
 
-The result report should include a rationale for each generated column:
+The result report should show the full evidence chain, not only the final schema. It should include:
 
 ```text
-column name
-- why it was created
+original value inventory
+- which original classification/tag columns were inspected
+- distinct value counts, empty/null counts, complete unique individual value lists with counts, and top observed values with counts
+
+semantic bucket analysis
+- which original values were treated as primary class, target audience, lifecycle, form factor, item type, function/need, display collection, or review signal
+- which resulting column each bucket became
+- why values were grouped, split, excluded, or left empty
+- which values are forbidden from the representative axis because they belong to an attribute axis
+
+derived column decisions
+- why each generated column was created
 - which source columns, value distributions, or samples justified it
-- whether it is single-value or multi-value
+- which single semantic property it represents and whether any multi-value exception is justified
 - how missing or ambiguous values are handled
+
+result column inventory
+- produced values and counts
+- empty count
+- fill rate, meaning filled rows / total rows
+- representative examples where useful
+- semantic disjointness validation, confirming attribute-owned values did not leak into the representative axis
 ```
 
-For DB-backed work, prefer a staging table:
+For DB-backed work, still prefer CSV by default:
+
+```text
+classification/
+  product_source.csv
+  derived_output.csv
+  derived_table.postgres.sql
+  classification_audit.csv
+  validation_report.json
+```
+
+When explicitly requested, a staging table can use:
 
 ```text
 classification_staging
@@ -233,10 +261,10 @@ Important output fields:
 | `review_status` | Review state such as `auto_accepted` or `needs_review`. |
 | `missing_required_axes` | Required classification axes that could not be filled. |
 
-When the user asks for data in the new schema defined by the rules, create a derived output. In this mode, do not copy every source column. Keep only minimal identity/display columns and the derived rule-axis columns.
+When the user asks for data in the new schema defined by the rules, create a derived CSV output by default. In this mode, do not copy every source column. Keep only minimal identity/display columns and the derived rule-axis columns. Create a DB table only when explicitly requested.
 
 ```text
-derived_classification_table
+derived_classification_csv
 - source_row_id
 - minimal source identity/display columns such as product_id, sku, goods_name, title
 - one column per rule axis
@@ -278,7 +306,7 @@ By default, this skill does not:
 The safe path is:
 
 ```text
-source data -> profile -> apply rules -> separate output file/staging table
+source data -> profile -> apply rules -> separate CSV output file
 ```
 
 If the user wants to promote results into the source schema, that should be handled later through a separate migration or ETL plan with explicit approval.
@@ -314,8 +342,8 @@ If the user wants to promote results into the source schema, that should be hand
 | `scripts/apply_rules.py` | Creates sidecar classification output. |
 | `scripts/classify_dataset.py` | Creates enriched output copies. |
 | `scripts/validate_classification.py` | Validates classification output. |
-| `scripts/create_staging_table.py` | Loads classification results into a staging table. |
-| `scripts/create_derived_table.py` | Creates derived CSV/JSON/DB tables with rule axes expanded into real columns. |
+| `scripts/create_staging_table.py` | Loads classification results into a staging table when explicitly requested. |
+| `scripts/create_derived_table.py` | Creates derived CSV/JSON outputs by default, with optional DB table loading when explicitly requested. |
 
 ## Rule Format
 
